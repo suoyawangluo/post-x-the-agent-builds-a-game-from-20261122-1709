@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One-Prompt Snake — built by an AI agent</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 16px;
+  }
+  h1 { font-size: 22px; letter-spacing: 1px; }
+  h1 span { color: #3fb950; }
+  #hud {
+    display: flex;
+    gap: 28px;
+    font-size: 16px;
+    color: #8b949e;
+  }
+  #hud b { color: #e6edf3; }
+  canvas {
+    background: #161b22;
+    border: 2px solid #30363d;
+    border-radius: 10px;
+    box-shadow: 0 0 40px rgba(63, 185, 80, 0.25);
+  }
+  #msg { font-size: 15px; color: #d29922; min-height: 22px; }
+  #help { font-size: 13px; color: #6e7681; }
+  #help kbd {
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: #e6edf3;
+  }
+  footer { font-size: 12px; color: #484f58; }
+  footer a { color: #58a6ff; text-decoration: none; }
+</style>
+</head>
+<body>
+<h1>🐍 ONE-PROMPT <span>SNAKE</span></h1>
+<div id="hud">
+  <div>Score <b id="score">0</b></div>
+  <div>Best <b id="best">0</b></div>
+  <div>Length <b id="len">3</b></div>
+</div>
+<canvas id="game" width="640" height="400"></canvas>
+<div id="msg">Press an arrow key or tap to start</div>
+<div id="help"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to steer &nbsp;·&nbsp; <kbd>Space</kbd> to pause &nbsp;·&nbsp; <kbd>R</kbd> to restart</div>
+<footer>Built from one prompt by an AI agent · <a href="https://make.fun">make.fun</a></footer>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var scoreEl = document.getElementById("score");
+  var bestEl = document.getElementById("best");
+  var lenEl = document.getElementById("len");
+  var msgEl = document.getElementById("msg");
+
+  var CELL = 20;
+  var COLS = canvas.width / CELL;   // 32
+  var ROWS = canvas.height / CELL;  // 20
+  var STEP_MS = 110;
+
+  var demo = new URLSearchParams(location.search).get("demo") === "1";
+
+  var snake, dir, pendingDir, food, score, best, alive, started, timer;
+
+  function reset() {
+    snake = [{ x: 8, y: 10 }, { x: 7, y: 10 }, { x: 6, y: 10 }];
+    dir = { x: 1, y: 0 };
+    pendingDir = dir;
+    score = 0;
+    alive = true;
+    started = false;
+    placeFood();
+    draw();
+    updateHud();
+  }
+
+  function placeFood() {
+    var p;
+    do {
+      p = {
+        x: Math.floor(Math.random() * COLS),
+        y: Math.floor(Math.random() * ROWS)
+      };
+    } while (snake.some(function (s) { return s.x === p.x && s.y === p.y; }));
+    food = p;
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    bestEl.textContent = best;
+    lenEl.textContent = snake.length;
+  }
+
+  // Demo mode: steer the snake toward the food, avoiding its own body.
+  function demoSteer() {
+    var head = snake[0];
+    var options = [
+      { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }
+    ].filter(function (d) {
+      if (d.x === -dir.x && d.y === -dir.y) return false; // no reversing
+      var nx = head.x + d.x, ny = head.y + d.y;
+      if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return false;
+      return !snake.some(function (s, i) {
+        return i < snake.length - 1 && s.x === nx && s.y === ny;
+      });
+    });
+    if (!options.length) return;
+    options.sort(function (a, b) {
+      var da = Math.abs(head.x + a.x - food.x) + Math.abs(head.y + a.y - food.y);
+      var db = Math.abs(head.x + b.x - food.x) + Math.abs(head.y + b.y - food.y);
+      return da - db;
+    });
+    pendingDir = options[0];
+  }
+
+  function step() {
+    if (!alive) return;
+    if (demo) demoSteer();
+    dir = pendingDir;
+    var head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+    if (head.x < 0 || head.y < 0 || head.x >= COLS || head.y >= ROWS ||
+        snake.some(function (s) { return s.x === head.x && s.y === head.y; })) {
+      alive = false;
+      clearInterval(timer);
+      if (score > best) best = score;
+      msgEl.textContent = "Game over! Score " + score + " — press R to play again";
+      updateHud();
+      draw();
+      return;
+    }
+    snake.unshift(head);
+    if (head.x === food.x && head.y === food.y) {
+      score += 10;
+      placeFood();
+    } else {
+      snake.pop();
+    }
+    updateHud();
+    draw();
+  }
+
+  function draw() {
+    ctx.fillStyle = "#161b22";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // grid dots
+    ctx.fillStyle = "#1f242c";
+    for (var gx = 0; gx < COLS; gx++) {
+      for (var gy = 0; gy < ROWS; gy++) {
+        ctx.fillRect(gx * CELL + 9, gy * CELL + 9, 2, 2);
+      }
+    }
+    // food
+    ctx.fillStyle = "#f85149";
+    ctx.beginPath();
+    ctx.arc(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2, 8, 0, Math.PI * 2);
+    ctx.fill();
+    // snake
+    snake.forEach(function (s, i) {
+      ctx.fillStyle = i === 0 ? "#3fb950" : "#2ea043";
+      var pad = i === 0 ? 1 : 2;
+      ctx.fillRect(s.x * CELL + pad, s.y * CELL + pad, CELL - pad * 2, CELL - pad * 2);
+    });
+    if (demo) {
+      ctx.fillStyle = "rgba(210,153,34,0.9)";
+      ctx.font = "bold 13px monospace";
+      ctx.fillText("DEMO — agent playing", 12, 20);
+    }
+  }
+
+  function start() {
+    if (started) return;
+    started = true;
+    msgEl.textContent = demo ? "Agent playing…" : "Good luck!";
+    timer = setInterval(step, STEP_MS);
+  }
+
+  function setDir(x, y) {
+    if (x === -dir.x && y === -dir.y) return;
+    pendingDir = { x: x, y: y };
+    start();
+  }
+
+  document.addEventListener("keydown", function (e) {
+    var k = e.key;
+    if (k === "ArrowUp" || k === "w" || k === "W") { setDir(0, -1); e.preventDefault(); }
+    else if (k === "ArrowDown" || k === "s" || k === "S") { setDir(0, 1); e.preventDefault(); }
+    else if (k === "ArrowLeft" || k === "a" || k === "A") { setDir(-1, 0); e.preventDefault(); }
+    else if (k === "ArrowRight" || k === "d" || k === "D") { setDir(1, 0); e.preventDefault(); }
+    else if (k === " ") {
+      if (started && alive) { clearInterval(timer); started = false; msgEl.textContent = "Paused — press Space to resume"; }
+      else if (alive) { start(); }
+      e.preventDefault();
+    } else if (k === "r" || k === "R") { clearInterval(timer); reset(); start(); }
+  });
+
+  canvas.addEventListener("click", function () { start(); });
+
+  reset();
+  if (demo) start();
+})();
+</script>
+</body>
+</html>
